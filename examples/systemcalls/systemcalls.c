@@ -57,12 +57,8 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 /*
- * TODO:
  *   Execute a system command by calling fork, execv(),
  *   and wait instead of system (see LSP page 161).
  *   Use the command[0] as the full path to the command to execute
@@ -73,7 +69,46 @@ bool do_exec(int count, ...)
 
     va_end(args);
 
-    return true;
+    // Flush stdout to avoid duplicate output
+    fflush(stdout);
+
+    // Fork a child
+    pid_t pid = fork();
+
+    // Fork error
+    if (pid == -1)
+    {
+        // perror() grabs the latest errno
+        perror("fork");
+        return false;
+    }
+
+    // Child
+    if (!pid)
+    {
+        // The exec() functions only return if an error has occurred. The return value is -1, and errno is set to indicate the error.
+        if (execv(command[0], command) == -1)
+        {
+            // perror() grabs the latest errno
+            perror("execv");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Parent
+    if (pid > 0)
+    {
+        int status;
+        // waitpid() returns -1 on error, and child pid on successful change
+        if (waitpid(pid, &status, 0) == -1)
+            return false;
+
+        // Did the child close normally AND have an exit code of 0?
+        if (WIFEXITED(status) && !WEXITSTATUS(status))
+            return true;
+    }
+
+    return false;
 }
 
 /**

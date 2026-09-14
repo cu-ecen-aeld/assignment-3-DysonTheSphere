@@ -99,7 +99,7 @@ bool do_exec(int count, ...)
     if (pid > 0)
     {
         int status;
-        // waitpid() returns -1 on error, and child pid on successful change
+        // waitpid() returns -1 on error, and child pid on successful change, I prefer waiting for specific pid since it's handy
         if (waitpid(pid, &status, 0) == -1)
             return false;
 

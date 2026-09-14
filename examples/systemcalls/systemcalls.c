@@ -17,7 +17,20 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+    // IS cmd NULL?
+    if (!cmd)
+        return false;
+
+    int rc = system(cmd);
+    // Child process could not be created, or status could not be retrieved
+    if (rc == -1)
+        return false;
+
+    // Did the child close normally AND have an exit code of 0?
+    if (WIFEXITED(rc) && !WEXITSTATUS(rc))
+        return true;
+
+    return false;
 }
 
 /**

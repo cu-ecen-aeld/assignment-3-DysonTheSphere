@@ -1,5 +1,8 @@
 #include "systemcalls.h"
-
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -11,13 +14,25 @@ bool do_system(const char *cmd)
 {
 
 /*
- * TODO  add your code here
  *  Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
 
-    return true;
+    // IS cmd NULL?
+    if (!cmd)
+        return false;
+
+    int rc = system(cmd);
+    // Child process could not be created, or status could not be retrieved
+    if (rc == -1)
+        return false;
+
+    // Did the child close normally AND have an exit code of 0?
+    if (WIFEXITED(rc) && !WEXITSTATUS(rc))
+        return true;
+
+    return false;
 }
 
 /**
@@ -45,12 +60,8 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 /*
- * TODO:
  *   Execute a system command by calling fork, execv(),
  *   and wait instead of system (see LSP page 161).
  *   Use the command[0] as the full path to the command to execute
@@ -61,7 +72,49 @@ bool do_exec(int count, ...)
 
     va_end(args);
 
-    return true;
+    // Flush stdout to avoid duplicate output
+    fflush(stdout);
+
+    // Fork a child
+    pid_t pid = fork();
+
+    // Fork error
+    if (pid == -1)
+    {
+        // perror() grabs the latest errno
+        perror("fork");
+        return false;
+    }
+
+    // Child
+    if (!pid)
+    {
+        // The exec() functions only return if an error has occurred. The return value is -1, and errno is set to indicate the error.
+        if (execv(command[0], command) == -1)
+        {
+            // perror() grabs the latest errno
+            perror("execv");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Parent
+    if (pid > 0)
+    {
+        int status;
+        // waitpid() returns -1 on error, and child pid on successful change, I prefer waiting for specific pid since it's handy
+        if (waitpid(pid, &status, 0) == -1)
+        {
+            perror("waitpid");
+            return false;
+        }
+
+        // Did the child close normally AND have an exit code of 0?
+        if (WIFEXITED(status) && !WEXITSTATUS(status))
+            return true;
+    }
+
+    return false;
 }
 
 /**
@@ -80,13 +133,8 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
 
 /*
- * TODO
  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
  *   redirect standard out to a file specified by outputfile.
  *   The rest of the behaviour is same as do_exec()
@@ -95,5 +143,74 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
 
     va_end(args);
 
-    return true;
+    // Flush stdout to avoid duplicate output
+    fflush(stdout);
+
+    // Source - https://stackoverflow.com/a/13784315
+    // Posted by tmyklebu, modified by community. See post 'Timeline' for change history
+    // Retrieved 2026-09-13, License - CC BY-SA 3.0
+
+    // NOTE: I really dislike this implementation as it is lazy and not POSIX Compliant, I pasted and modified to match my existing patterns in do_exec()
+
+    // Open a file
+    int fd = open(outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+
+    // File error
+    if (fd < 0)
+    {
+        perror("open");
+        return false;
+    }
+
+    // Fork a child
+    pid_t pid = fork();
+
+    // Fork error
+    if (pid == -1)
+    {
+        perror("fork");
+        close(fd);
+        return false;
+    }
+
+    // Child
+    if (!pid)
+    {
+        // Redirect STDOUT to fd
+        if (dup2(fd, STDOUT_FILENO) < 0)
+        {
+            perror("dup2");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+        close(fd);
+
+        // The exec() functions only return if an error has occurred. The return value is -1, and errno is set to indicate the error.
+        if (execv(command[0], command) == -1)
+        {
+            perror("execv");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Parent
+    if (pid > 0)
+    {
+        close(fd);
+
+        int status;
+        // waitpid() returns -1 on error, and child pid on successful change, I prefer waiting for specific pid since it's handy
+        if (waitpid(pid, &status, 0) == -1)
+        {
+            perror("waitpid");
+            return false;
+        }
+
+        // Did the child close normally AND have an exit code of 0?
+        if (WIFEXITED(status) && !WEXITSTATUS(status))
+            return true;
+    }
+
+    return false;
 }

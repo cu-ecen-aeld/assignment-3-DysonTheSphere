@@ -24,11 +24,15 @@ void signal_handler(int sig)
     got_sig = 1;
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
     struct addrinfo hints, *res;
     int rc;
     int sockfd;
+    int daemon = 0;
+    
+    if (argc > 1 && strcmp(argv[1], "-d") == 0)
+        daemon = 1;
 
     // The use of closelog() is optional.
     openlog("aesdsocket", LOG_PID | LOG_CONS, LOG_USER);
@@ -94,6 +98,48 @@ int main(void)
     }
     // Bound! No longer needed
     freeaddrinfo(res);
+    
+    // Daemon?
+    if (daemon)
+    {
+        pid_t pid = fork();
+        if (pid < 0)
+        {
+            perror("fork");
+            close(sockfd);
+            return -1;
+        }
+        
+        // Parent
+        if (pid > 0)
+        {
+            _exit(EXIT_SUCCESS);
+        }
+        
+        // Child
+        if (setsid() == -1)
+        {
+            perror("setsid");
+            close(sockfd);
+            return -1;
+        }
+        
+        if (chdir("/") == -1)
+        {
+            perror("chdir");
+            close(sockfd);
+            return -1;
+        }
+        
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0)
+        {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+    }
 
     // Listen for connections
     rc = listen(sockfd, BACKLOG);

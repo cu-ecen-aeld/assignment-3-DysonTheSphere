@@ -127,7 +127,8 @@ static void *assign_worker(void *arg)
             char log_buf[NI_MAXHOST + 27];
             snprintf(log_buf, sizeof(log_buf), "Closed connection from %s\n", curr_worker->client_ip);
             const char* closed = log_buf;
-            write(STDOUT_FILENO, closed, strlen(closed));
+            if (write(STDOUT_FILENO, closed, strlen(closed)) == -1 && errno != EINTR)
+                // Ignored, this is an additional print solely for runtime debugging
             syslog(LOG_INFO, "%s", closed);
             break;
         }
@@ -295,7 +296,9 @@ static void *hr_worker(void *arg)
             int filefd = open(FILE_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
             if (filefd != -1)
             {
-                write(filefd, time_str, len);
+                if (write(filefd, time_str, len) == -1)
+                    syslog(LOG_ERR, "Failed to write timestamp: %s", strerror(errno));
+                
                 close(filefd);
             }
             
@@ -490,7 +493,8 @@ int main(int argc, char *argv[])
         const char* accepted = log_buf;
 
         // Log success
-        write(STDOUT_FILENO, accepted, strlen(accepted));
+        if (write(STDOUT_FILENO, accepted, strlen(accepted)) == -1 && errno != EINTR)
+            // Ignored, this is an additional print solely for runtime debugging 
         syslog(LOG_INFO, "%s", accepted);
         
         // Hire a worker

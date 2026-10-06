@@ -118,9 +118,9 @@ static void *assign_worker(void *arg)
                     recv_total = i + 1;
                     break;
                 }
-                // newline not found, all bytes tracked
-                if (!recv_done)    
-                    recv_total += bytes;
+            // newline not found, all bytes tracked
+            if (!recv_done)    
+                recv_total += bytes;
         }
         else if (bytes == 0)
         {

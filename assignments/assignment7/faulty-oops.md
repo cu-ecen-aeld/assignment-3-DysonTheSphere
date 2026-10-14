@@ -1,7 +1,7 @@
 `$ echo “hello_world” > /dev/faulty`
 ### The module's attempt to write to a null address
 > [   22.813501] Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
-
+```
 [   22.813949] Mem abort info:
 [   22.814053]   ESR = 0x0000000096000044
 [   22.814197]   EC = 0x25: DABT (current EL), IL = 32 bits
@@ -19,9 +19,10 @@
 [   22.816941] CPU: 0 PID: 172 Comm: sh Tainted: G           O       6.6.84 #1
 [   22.817272] Hardware name: linux,dummy-virt (DT)
 [   22.817554] pstate: 80000005 (Nzcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+```
 ### Offending function call
 > [   22.817849] pc : faulty_write+0x8/0x10 [faulty]
-
+```
 [   22.818273] lr : vfs_write+0xc8/0x30c
 [   22.818445] sp : ffff80008027bd20
 [   22.818595] x29: ffff80008027bd80 x28: ffff077bc233ad00 x27: 0000000000000000
@@ -35,6 +36,7 @@
 [   22.820383] x5 : 0000000000000000 x4 : ffffc69ec5437000 x3 : ffff80008027bdc0
 [   22.820558] x2 : 0000000000000012 x1 : 0000000000000000 x0 : 0000000000000000
 [   22.820822] Call trace:
+```
 ### Made it down to memory management before reading a null address
 > [   22.821039]  faulty_write+0x8/0x10 [faulty]
 

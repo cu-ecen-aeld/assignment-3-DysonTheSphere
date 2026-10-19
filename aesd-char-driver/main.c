@@ -21,7 +21,7 @@
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Daniel A. Winston");
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
@@ -29,18 +29,19 @@ struct aesd_dev aesd_device;
 int aesd_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("open");
-    /**
-     * TODO: handle open
-     */
+    
+    // Grab a pointer to the char device
+    struct aesd_dev *dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
+    // Assign file pointer
+    filp->private_data = dev;
+    
     return 0;
 }
 
 int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
-    /**
-     * TODO: handle release
-     */
+    // Nothing to do here, filp is assigned a pointer to device loaded in kernel
     return 0;
 }
 
@@ -48,10 +49,40 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = 0;
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_buffer_entry *entry = NULL;
+    size_t entry_offset = 0;
+    
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
-    /**
-     * TODO: handle read
-     */
+    
+    // Obtain a lock
+    if (mutex_lock_interruptible(&dev->lock) != 0)
+        return -ERESTARTSYS;
+    
+    // Find read position based on f_pos
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, *f_pos, &entry_offset);
+    // NULL or EOF
+    if (!entry)
+        goto out;
+    
+    // Copy partial read to user space
+    size_t bytes_unread = entry->size - entry_offset;
+    if (count > bytes_unread)
+        count = bytes_unread;
+    
+    if (copy_to_user(buf, entry->buffptr + entry_offset, count))
+    {
+        retval = -EFAULT;
+        goto out;
+    }
+    
+    // Update f_pos
+    *f_pos += count;
+    retval = count;
+    
+    // Release lock and cleanup
+out:
+    mutex_unlock(&dev->lock);
     return retval;
 }
 

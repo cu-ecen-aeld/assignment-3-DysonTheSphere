@@ -165,39 +165,12 @@ static void *assign_worker(void *arg)
             close(filefd);
         }
         
-        // Read to buffer
-        char* send_buf = NULL;
-        int send_buf_size = 0;
-        
+        // Read and echo back to client
         filefd = open(FILE_PATH, O_RDONLY);
         if (filefd == -1)
             perror("file open");
         else
-        {
-            off_t file_size = lseek(filefd, 0, SEEK_END);
-            lseek(filefd, 0, SEEK_SET);
-            
-            if (file_size > 0)
-            {
-                send_buf = malloc(file_size);
-                
-                if (send_buf)
-                {
-                    int total_read = 0;
-                    while (total_read < file_size)
-                    {
-                        int bytes_read = read(filefd, send_buf + total_read, file_size - total_read);
-                        if (bytes_read <= 0)
-                            break;
-                        total_read += bytes_read;
-                    }
-                    
-                    send_buf_size = total_read;
-                }
-            }
-            close(filefd);
-            
-            /*
+        {            
             char echo_buf[CHUNK_SIZE];
             int bytes_read;
             
@@ -211,27 +184,9 @@ static void *assign_worker(void *arg)
                 }
             }   
             close(filefd);
-            */
         }
         // Release the lock
         pthread_mutex_unlock(&file_mutex);
-        
-        // Send to client
-        int sent_total = 0;
-        int send_remaining = send_buf_size;
-        while (send_remaining > 0)
-        {
-            int rc = send(clientfd, send_buf + sent_total, send_remaining, 0);
-            if (rc == -1)
-            {
-                perror("send");
-                break;
-            }
-                
-                sent_total += rc;
-                send_remaining -= rc;            
-        }
-        free(send_buf);
     }
     
     // Clean the heap buffer

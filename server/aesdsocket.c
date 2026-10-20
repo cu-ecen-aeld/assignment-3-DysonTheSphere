@@ -13,9 +13,18 @@
 
 #define PORT "9000"
 #define BACKLOG 10
-#define FILE_PATH "/var/tmp/aesdsocketdata"
 #define CHUNK_SIZE 2048
 #define TIMESTAMP_INTERVAL 10
+
+#ifndef USE_AESD_CHAR_DEVICE
+#define USE_AESD_CHAR_DEVICE 1
+#endif
+
+#if USE_AESD_CHAR_DEVICE
+#define FILE_PATH "/dev/aesdchar"
+#else
+#define FILE_PATH "/var/tmp/aesdsocketdata"
+#endif
 
 // Behavior is undefined if the signal handler refers to any object other than by... 
 // assigning a value to an object declared as volatile sig_atomic_t
@@ -156,39 +165,12 @@ static void *assign_worker(void *arg)
             close(filefd);
         }
         
-        // Read to buffer
-        char* send_buf = NULL;
-        int send_buf_size = 0;
-        
+        // Read and echo back to client
         filefd = open(FILE_PATH, O_RDONLY);
         if (filefd == -1)
             perror("file open");
         else
-        {
-            off_t file_size = lseek(filefd, 0, SEEK_END);
-            lseek(filefd, 0, SEEK_SET);
-            
-            if (file_size > 0)
-            {
-                send_buf = malloc(file_size);
-                
-                if (send_buf)
-                {
-                    int total_read = 0;
-                    while (total_read < file_size)
-                    {
-                        int bytes_read = read(filefd, send_buf + total_read, file_size - total_read);
-                        if (bytes_read <= 0)
-                            break;
-                        total_read += bytes_read;
-                    }
-                    
-                    send_buf_size = total_read;
-                }
-            }
-            close(filefd);
-            
-            /*
+        {            
             char echo_buf[CHUNK_SIZE];
             int bytes_read;
             
@@ -202,27 +184,9 @@ static void *assign_worker(void *arg)
                 }
             }   
             close(filefd);
-            */
         }
         // Release the lock
         pthread_mutex_unlock(&file_mutex);
-        
-        // Send to client
-        int sent_total = 0;
-        int send_remaining = send_buf_size;
-        while (send_remaining > 0)
-        {
-            int rc = send(clientfd, send_buf + sent_total, send_remaining, 0);
-            if (rc == -1)
-            {
-                perror("send");
-                break;
-            }
-                
-                sent_total += rc;
-                send_remaining -= rc;            
-        }
-        free(send_buf);
     }
     
     // Clean the heap buffer
@@ -265,6 +229,7 @@ static void retire_workers(aesdworker_fire_t mode)
     }
 }
 
+#if (!USE_AESD_CHAR_DEVICE)
 // Dedicated timekeeper
 static void *hr_worker(void *arg)
 {
@@ -308,6 +273,7 @@ static void *hr_worker(void *arg)
     }
     return NULL;
 }
+#endif
 
 int main(int argc, char *argv[])
 {     
@@ -434,7 +400,7 @@ int main(int argc, char *argv[])
         close(sockfd);
         return -1;
     }
-    
+#if (!USE_AESD_CHAR_DEVICE)
     // Initialize the clock
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -453,11 +419,11 @@ int main(int argc, char *argv[])
     pthread_sigmask(SIG_SETMASK, &oldset, NULL);
     if (rc != 0)
     {
-        fprintf(stderr, "pthread_create timekeeperL %s\n", strerror(rc));
+        fprintf(stderr, "pthread_create timekeeper %s\n", strerror(rc));
         close(sockfd);
         return -1;
     }
-    
+#endif
     
     // Server loop
     while(!got_sig)
@@ -511,13 +477,14 @@ int main(int argc, char *argv[])
     
     // Cleanup
     close(sockfd);
-    
+#if (!USE_AESD_CHAR_DEVICE)
     // Out of business!
     pthread_join(timekeeper, NULL);
+#endif
     retire_workers(ALL);
-    
+#if (!USE_AESD_CHAR_DEVICE)
     unlink(FILE_PATH);
-    
+#endif
     syslog(LOG_INFO, "Caught signal, exiting");
     closelog();
     

@@ -13,9 +13,18 @@
 
 #define PORT "9000"
 #define BACKLOG 10
-#define FILE_PATH "/var/tmp/aesdsocketdata"
 #define CHUNK_SIZE 2048
 #define TIMESTAMP_INTERVAL 10
+
+#ifndef USE_AESD_CHAR_DEVICE
+#define USE_AESD_CHAR_DEVICE 1
+#endif
+
+#if USE_AESD_CHAR_DEVICE
+#define FILE_PATH "/dev/aesdchar"
+#else
+#define FILE_PATH "/var/tmp/aesdsocketdata"
+#endif
 
 // Behavior is undefined if the signal handler refers to any object other than by... 
 // assigning a value to an object declared as volatile sig_atomic_t
@@ -265,6 +274,7 @@ static void retire_workers(aesdworker_fire_t mode)
     }
 }
 
+#if (!USE_AESD_CHAR_DEVICE)
 // Dedicated timekeeper
 static void *hr_worker(void *arg)
 {
@@ -308,6 +318,7 @@ static void *hr_worker(void *arg)
     }
     return NULL;
 }
+#endif
 
 int main(int argc, char *argv[])
 {     
@@ -434,7 +445,7 @@ int main(int argc, char *argv[])
         close(sockfd);
         return -1;
     }
-    
+#if (!USE_AESD_CHAR_DEVICE)
     // Initialize the clock
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -453,11 +464,11 @@ int main(int argc, char *argv[])
     pthread_sigmask(SIG_SETMASK, &oldset, NULL);
     if (rc != 0)
     {
-        fprintf(stderr, "pthread_create timekeeperL %s\n", strerror(rc));
+        fprintf(stderr, "pthread_create timekeeper %s\n", strerror(rc));
         close(sockfd);
         return -1;
     }
-    
+#endif
     
     // Server loop
     while(!got_sig)
@@ -511,13 +522,14 @@ int main(int argc, char *argv[])
     
     // Cleanup
     close(sockfd);
-    
+#if (!USE_AESD_CHAR_DEVICE)
     // Out of business!
     pthread_join(timekeeper, NULL);
+#endif
     retire_workers(ALL);
-    
+#if (!USE_AESD_CHAR_DEVICE)
     unlink(FILE_PATH);
-    
+#endif
     syslog(LOG_INFO, "Caught signal, exiting");
     closelog();
     

@@ -22,6 +22,7 @@
 
 #if USE_AESD_CHAR_DEVICE
 #define FILE_PATH "/dev/aesdchar"
+#include "../aesd-char-driver/aesd_ioctl.h"
 #else
 #define FILE_PATH "/var/tmp/aesdsocketdata"
 #endif
@@ -153,20 +154,47 @@ static void *assign_worker(void *arg)
         // Obtain a lock
         pthread_mutex_lock(&file_mutex);
         
-        // Flush to disk
-        int filefd = open(FILE_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
+        int filefd = -1;
+        int is_seek = 0;
+        unsigned int seek_cmd = 0, seek_offset = 0;
+        
+#if USE_AESD_CHAR_DEVICE
+        if (sscanf(recv_buf, "AESDCHAR_IOCSEEKTO:%u,%u", &seek_cmd, &seek_offset) == 2)
+        {
+            is_seek = 1;
+            // Needs RDWR for ioctl
+            filefd = open(FILE_PATH, O_RDWR | O_CREAT, 0666);
+        }
+        else
+            filefd = open(FILE_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
+#else
+        filefd = open(FILE_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
+#endif
         if (filefd == -1)
             perror("file open");
         else
         {
-            if (write(filefd, recv_buf, recv_total) == -1)
-                perror("file write");
-            
-            close(filefd);
+            if (is_seek)
+            {
+                struct aesd_seekto seekto = {
+                  .write_cmd        = seek_cmd,
+                  .write_cmd_offset = seek_offset
+                };
+                
+                if (ioctl(filefd, AESDCHAR_IOCSEEKTO, &seekto) < 0)
+                    perror("ioctl AESDCHAR_IOCSEEKTO");
+            }
+            else
+            {
+                if (write(filefd, recv_buf, recv_total) == -1)
+                    perror("file write");
+                
+                close(filefd);
+                filefd = open(FILE_PATH, O_RDONLY);
+            }
         }
         
         // Read and echo back to client
-        filefd = open(FILE_PATH, O_RDONLY);
         if (filefd == -1)
             perror("file open");
         else
@@ -185,6 +213,7 @@ static void *assign_worker(void *arg)
             }   
             close(filefd);
         }
+        
         // Release the lock
         pthread_mutex_unlock(&file_mutex);
     }

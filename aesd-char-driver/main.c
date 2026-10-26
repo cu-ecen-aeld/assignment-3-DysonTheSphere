@@ -18,6 +18,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -163,10 +164,39 @@ out:
     return retval;
 }
 
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
+{
+    struct aesd_dev *dev = filp->private_data;
+    loff_t sum = 0;
+    struct aesd_buffer_entry *entry = NULL;
+    uint8_t index;
+    
+    // Obtain a lock
+    if (mutex_lock_interruptible(&dev->lock) != 0)
+        return -ERESTARTSYS;
+    
+    // Summation
+    PDEBUG("Sizing up the circular buffer\n");
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->buffer, index)
+    {
+        if (entry->buffptr)
+            sum += entry->size;
+    }
+    PDEBUG("Size is: %lld\n", sum);
+    
+    // Release lock
+    mutex_unlock(&dev->lock);
+    
+    // Pass to kernel wrapper for lseek
+    PDEBUG("Calling lseek(dev, %lld, %d, %lld)", offset, whence, sum);
+    return fixed_size_llseek(filp, offset, whence, sum);
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
+    .llseek =   aesd_llseek,
     .open =     aesd_open,
     .release =  aesd_release,
 };

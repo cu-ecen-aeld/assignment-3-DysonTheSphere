@@ -18,6 +18,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -163,10 +164,121 @@ out:
     return retval;
 }
 
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
+{
+    struct aesd_dev *dev = filp->private_data;
+    loff_t sum = 0;
+    struct aesd_buffer_entry *entry = NULL;
+    uint8_t index;
+    
+    // Obtain a lock
+    if (mutex_lock_interruptible(&dev->lock) != 0)
+        return -ERESTARTSYS;
+    
+    // Summation
+    PDEBUG("Sizing up the circular buffer\n");
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->buffer, index)
+    {
+        if (entry->buffptr)
+            sum += entry->size;
+    }
+    PDEBUG("Size is: %lld\n", sum);
+    
+    // Release lock
+    mutex_unlock(&dev->lock);
+    
+    // Pass to kernel wrapper for lseek
+    PDEBUG("Calling lseek(dev, %lld, %d, %lld)", offset, whence, sum);
+    return fixed_size_llseek(filp, offset, whence, sum);
+}
+
+long aesd_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    long retval = -ENOTTY;
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_seekto seekto;
+    bool locked = false;
+    
+    // Is the command meant for us?
+    if (_IOC_TYPE(cmd) != AESD_IOC_MAGIC || _IOC_NR(cmd) > AESDCHAR_IOC_MAXNR)
+        goto out;
+    
+    // Is it the one command we implemented?
+    if (cmd != AESDCHAR_IOCSEEKTO)
+        goto out;
+    
+    // Copy from argument from userspace
+    if (copy_from_user(&seekto, (void __user*) arg, sizeof(struct aesd_seekto)))
+    {
+        retval = -EFAULT;
+        goto out;
+    }
+    
+    // Obtain a lock
+    if (mutex_lock_interruptible(&dev->lock) != 0)
+    {
+        retval = -ERESTARTSYS;
+        goto out;
+    }
+    locked = true;
+    
+    // Iterate over circular buffer from read offset until we find the command
+    size_t index = dev->buffer.out_offs;
+    loff_t offset = 0;
+    struct aesd_buffer_entry *entry = NULL;
+    bool found = false;
+    
+    for (size_t i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++)
+    {
+        entry = &dev->buffer.entry[index];
+        
+        if (!entry->buffptr)
+            break;
+        
+        // Requested command?
+        if (i == seekto.write_cmd)
+        {
+            found = true;
+            
+            // In bounds?
+            if (seekto.write_cmd_offset >= entry->size)
+            {
+                retval = -EINVAL;
+                goto out;
+            }
+            else
+            {
+                offset += seekto.write_cmd_offset;
+            }
+            break;
+        }
+        
+        // Not our command, accumulate and iterate
+        offset += entry->size;
+        index = (index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
+    
+    if (!found)
+    {
+        retval = -EINVAL;
+        goto out;
+    }
+    
+    filp->f_pos = offset;
+    retval = 0;
+    
+out:
+    if (locked)
+        mutex_unlock(&dev->lock);
+    return retval;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
+    .llseek =   aesd_llseek,
+    .unlocked_ioctl = aesd_ioctl,
     .open =     aesd_open,
     .release =  aesd_release,
 };
